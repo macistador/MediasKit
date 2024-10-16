@@ -7,19 +7,20 @@
 
 import Foundation
 
-// Do we want to be that specific?
 enum CacheType {
     case memory
     case disk
+    case memoryAndDisk
 }
 
 protocol CacheServiceLogic: Actor {
     associatedtype Value
     associatedtype Key: Hashable
 
-    func insert(_ value: Value, forKey key: Key, in cacheType: CacheType)
-    func value(forKey key: Key, in cacheType: CacheType) -> Value?
-    func removeValue(forKey key: Key, in cacheType: CacheType)
+    func insert(_ value: Value, forKey key: Key)
+    func value(forKey key: Key) -> Value?
+    func removeValue(forKey key: Key)
+    func clearCache()
 }
 
 final class CacheKey<T: Hashable>: NSObject {
@@ -50,48 +51,37 @@ final class CacheEntry<Value> {
 
 actor CacheService<Key: Hashable, Value>: CacheServiceLogic {
     private let cache = NSCache<CacheKey<Key>, CacheEntry<Value>>()
-    private let cacheExpiration: TimeInterval
     private let cacheCreation: Date = .now
+    private let cacheExpiration: TimeInterval
+    private let cacheType: CacheType
 
-    init(countLimit: Int = 0, costLimit: Int = 0, expiration: TimeInterval = .oneDay) {
+    init(countLimit: Int = 0, costLimit: Int = 0, expiration: TimeInterval = .oneDay, cacheType: CacheType = .memoryAndDisk) {
         cache.countLimit = countLimit
         cache.totalCostLimit = costLimit
         cacheExpiration = expiration
+        self.cacheType = cacheType
     }
 
-    func insert(_ value: Value, forKey key: Key, in cacheType: CacheType) {
-        switch cacheType {
-        case .memory:
-            let expirationDate = cacheCreation.addingTimeInterval(cacheExpiration)
-            let entry = CacheEntry(value: value, expirationDate: expirationDate)
-            cache.setObject(entry, forKey: CacheKey(key))
-        case .disk:
-            break // TODO:
-        }
+    func insert(_ value: Value, forKey key: Key) {
+        let expirationDate = cacheCreation.addingTimeInterval(cacheExpiration)
+        let entry = CacheEntry(value: value, expirationDate: expirationDate)
+        cache.setObject(entry, forKey: CacheKey(key))
     }
 
-    func value(forKey key: Key, in cacheType: CacheType) -> Value? {
-        switch cacheType {
-        case .memory:
-            guard let cacheEntry = cache.object(forKey: CacheKey(key)) else { return nil }
-            guard cacheEntry.expirationDate > cacheCreation else {
-                removeValue(forKey: key, in: cacheType)
-                return nil
-            }
-            return cacheEntry.value
-        case .disk:
-            return nil // TODO:
+    func value(forKey key: Key) -> Value? {
+        guard let cacheEntry = cache.object(forKey: CacheKey(key)) else { return nil }
+        guard cacheEntry.expirationDate > cacheCreation else {
+            removeValue(forKey: key)
+            return nil
         }
+        return cacheEntry.value
     }
 
-    func removeValue(forKey key: Key, in cacheType: CacheType) {
-        switch cacheType {
-        case .memory:
-            cache.removeObject(forKey: CacheKey(key))
-        case .disk:
-            break // TODO: 
-        }
+    func removeValue(forKey key: Key) {
+        cache.removeObject(forKey: CacheKey(key))
+    }
+
+    func clearCache() {
+        cache.removeAllObjects()
     }
 }
-
-
