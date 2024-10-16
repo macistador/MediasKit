@@ -19,8 +19,8 @@ protocol CacheServiceLogic: Actor {
 
     func insert(_ value: Value, forKey key: Key)
     func value(forKey key: Key) -> Value?
-    func removeValue(forKey key: Key)
-    func clearCache()
+    func remove(forKey key: Key)
+    func clear()
 }
 
 final class CacheKey<T: Hashable>: NSObject {
@@ -51,37 +51,41 @@ final class CacheEntry<Value> {
 
 actor CacheService<Key: Hashable, Value>: CacheServiceLogic {
     private let cache = NSCache<CacheKey<Key>, CacheEntry<Value>>()
-    private let cacheCreation: Date = .now
-    private let cacheExpiration: TimeInterval
-    private let cacheType: CacheType
+    private let creationDate: Date = .now
+    private let expirationTime: TimeInterval
+    private let type: CacheType
 
-    init(countLimit: Int = 0, costLimit: Int = 0, expiration: TimeInterval = .oneDay, cacheType: CacheType = .memoryAndDisk) {
+    init(countLimit: Int = 0, costLimit: Int = 0, expirationTime: TimeInterval = .oneDay, cacheType: CacheType = .memoryAndDisk) {
         cache.countLimit = countLimit
         cache.totalCostLimit = costLimit
-        cacheExpiration = expiration
-        self.cacheType = cacheType
+        self.expirationTime = expirationTime
+        self.type = cacheType
     }
 
+    // TODO: memory
     func insert(_ value: Value, forKey key: Key) {
-        let expirationDate = cacheCreation.addingTimeInterval(cacheExpiration)
+        let expirationDate = creationDate.addingTimeInterval(expirationTime)
         let entry = CacheEntry(value: value, expirationDate: expirationDate)
         cache.setObject(entry, forKey: CacheKey(key))
     }
 
+    // TODO: memory
     func value(forKey key: Key) -> Value? {
         guard let cacheEntry = cache.object(forKey: CacheKey(key)) else { return nil }
-        guard cacheEntry.expirationDate > cacheCreation else {
-            removeValue(forKey: key)
+        guard cacheEntry.expirationDate > creationDate else {
+            remove(forKey: key)
             return nil
         }
         return cacheEntry.value
     }
 
-    func removeValue(forKey key: Key) {
+    // TODO: memory
+    func remove(forKey key: Key) {
         cache.removeObject(forKey: CacheKey(key))
     }
 
-    func clearCache() {
+    // TODO: memory
+    func clear() {
         cache.removeAllObjects()
     }
 }
