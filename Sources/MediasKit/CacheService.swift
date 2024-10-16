@@ -14,7 +14,7 @@ enum CacheType {
 }
 
 protocol CacheServiceLogic: Actor {
-    associatedtype Value
+    associatedtype Value: Codable
     associatedtype Key: Hashable
 
     func insert(_ value: Value, forKey key: Key)
@@ -26,6 +26,9 @@ protocol CacheServiceLogic: Actor {
 final class CacheKey<T: Hashable>: NSObject {
     override var hash: Int {
         return key.hashValue
+    }
+    var pathComponent: String {
+        return hash.description + ".cache"
     }
     private let key: T
 
@@ -39,7 +42,7 @@ final class CacheKey<T: Hashable>: NSObject {
     }
 }
 
-final class CacheEntry<Value> {
+final class CacheEntry<Value: Decodable> {
     let value: Value
     let expirationDate: Date
 
@@ -61,12 +64,13 @@ extension URL {
     }
 }
 
-actor CacheService<Key: Hashable, Value>: CacheServiceLogic {
+actor CacheService<Key: Hashable, Value: Codable>: CacheServiceLogic {
     private let memory = NSCache<CacheKey<Key>, CacheEntry<Value>>()
     private let disk = URL.cachesDirectory
     private let creationDate: Date = .now
     private let expirationTime: TimeInterval
     private let type: CacheType
+    private let fileManager: FileManager
     private var isMemoryType: Bool {
         return type == .memory || type == .memoryAndDisk
     }
@@ -74,32 +78,37 @@ actor CacheService<Key: Hashable, Value>: CacheServiceLogic {
         return type == .disk || type == .memoryAndDisk
     }
 
-    init(countLimit: Int = 0, costLimit: Int = 0, expirationTime: TimeInterval = .oneDay, type: CacheType = .memoryAndDisk) {
+    init(countLimit: Int = 0, costLimit: Int = 0, expirationTime: TimeInterval = .oneDay, type: CacheType = .memoryAndDisk, fileManager: FileManager = .default) {
         memory.countLimit = countLimit
         memory.totalCostLimit = costLimit
         self.expirationTime = expirationTime
         self.type = type
+        self.fileManager = fileManager
     }
 
     func insert(_ value: Value, forKey key: Key) {
         insertInMemory(value, forKey: key)
-        insertInDisk(value, forKey: key)
+        try? insertInDisk(value, forKey: key)
     }
 
     func value(forKey key: Key) -> Value? {
-////        return valueInCache(forKey: key) ?? valueInDisk(forKey: key)
-////        if let valueInCache = valueInCache(forKey: <#T##Hashable#>)
-//        return nil
+        if let valueInMemory = valueInMemory(forKey: key) {
+            return valueInMemory
+        } else if let valueInDisk = try? valueInDisk(forKey: key) {
+            return valueInDisk
+        } else {
+            return nil
+        }
     }
 
-    // TODO: memory
     func remove(forKey key: Key) {
-
+        removeInMemory(forKey: key)
+        removeInDisk(forKey: key)
     }
 
-    // TODO: memory
     func removeAll() {
         removeAllInMemory()
+        removeAllInDisk()
     }
 
     // MARK: - Memory
@@ -130,19 +139,29 @@ actor CacheService<Key: Hashable, Value>: CacheServiceLogic {
     }
 
     // MARK: - Disk
-    private func insertInDisk(_ value: Value, forKey key: Key) {
+    private func insertInDisk(_ value: Value, forKey key: Key) throws {
         guard isDiskType else { return }
+        let cachedFileURL = disk.appendingPathComponent(CacheKey(key).pathComponent) // Pas sûr de ça?? 🔍
+        let data = try JSONEncoder().encode(CacheEntry(value: value, expirationDate: expirationTime))
+        try data.write(to: cachedFileURL)
     }
 
-    private func valueInDisk(forKey key: Key) -> Value? {
-        guard isDiskType else { return nil }
-        return nil
+    // TODO:
+    private func valueInDisk(forKey key: Key) throws -> Value? {
+        guard isDiskType,
+              let data = fileManager.contents(atPath: disk.appendingPathComponent(CacheKey(key).pathComponent).path),
+              let cacheEntry = try JSONDecoder().decode(Value.self, from: data)
+        else { return nil }
+
+        return cacheEntry.value
     }
 
+    // TODO:
     private func removeInDisk(forKey key: Key) {
         guard isDiskType else { return }
     }
 
+    // TODO:
     private func removeAllInDisk() {
         guard isDiskType else { return }
     }
