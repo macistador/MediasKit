@@ -11,5 +11,4 @@ public enum MediaSource {
     case remote(URL)
     case image(UIImage)
     case data(Data)
-    case asset(ImageResource)
 }
