@@ -5,11 +5,11 @@
 //  Created by Michel-André Chirita on 07/10/2024.
 //
 
-import UIKit
+import SwiftUI
 
 public enum MediaSource {
     case remote(URL)
-    case image(UIImage)
+    case uiImage(UIImage)
+    case image(Image)
     case data(Data)
-    case asset(ImageResource)
 }
