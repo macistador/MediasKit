@@ -7,12 +7,6 @@
 
 import Foundation
 
-enum CacheType {
-    case memory
-    case disk
-    case memoryAndDisk
-}
-
 protocol CacheServiceLogic: Actor {
     associatedtype Value: Codable
     associatedtype Key: Hashable
@@ -20,48 +14,6 @@ protocol CacheServiceLogic: Actor {
     func insert(_ value: Value, forKey key: Key)
     func value(forKey key: Key) -> Value?
     func remove(forKey key: Key)
-    func removeAll()
-}
-
-final class CacheKey<T: Hashable>: NSObject {
-    override var hash: Int {
-        return key.hashValue
-    }
-    var pathComponent: String {
-        return hash.description + ".cache"
-    }
-    private let key: T
-
-    init(_ key: T) {
-        self.key = key
-    }
-
-    override func isEqual(_ object: Any?) -> Bool {
-        guard let value = object as? CacheKey else { return false }
-        return value.key == key
-    }
-}
-
-final class CacheEntry<Value: Decodable> {
-    let value: Value
-    let expirationDate: Date
-
-    init(value: Value, expirationDate: Date) {
-        self.value = value
-        self.expirationDate = expirationDate
-    }
-}
-
-extension URL {
-
-    @available(iOS, obsoleted: 16.0, message: "Use the URL.cachesDirectory built-in property")
-    static var cachesDirectory: URL {
-        if #available(iOS 16.0, *) {
-            return URL.cachesDirectory
-        } else {
-            return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        }
-    }
 }
 
 actor CacheService<Key: Hashable, Value: Codable>: CacheServiceLogic {
@@ -87,8 +39,9 @@ actor CacheService<Key: Hashable, Value: Codable>: CacheServiceLogic {
     }
 
     func insert(_ value: Value, forKey key: Key) {
-        insertInMemory(value, forKey: key)
-        try? insertInDisk(value, forKey: key)
+        let entry = CacheEntry(value: value, expirationDate: creationDate.addingTimeInterval(expirationTime))
+        insertInMemory(entry, forKey: key)
+        try? insertInDisk(entry, forKey: key)
     }
 
     func value(forKey key: Key) -> Value? {
@@ -106,23 +59,16 @@ actor CacheService<Key: Hashable, Value: Codable>: CacheServiceLogic {
         removeInDisk(forKey: key)
     }
 
-    func removeAll() {
-        removeAllInMemory()
-        removeAllInDisk()
-    }
-
     // MARK: - Memory
-    private func insertInMemory(_ value: Value, forKey key: Key) {
+    private func insertInMemory(_ entry: CacheEntry<Value>, forKey key: Key) {
         guard isMemoryType else { return }
-        let expirationDate = creationDate.addingTimeInterval(expirationTime)
-        let entry = CacheEntry(value: value, expirationDate: expirationDate)
         memory.setObject(entry, forKey: CacheKey(key))
     }
 
     private func valueInMemory(forKey key: Key) -> Value? {
         guard isMemoryType, let cacheEntry = memory.object(forKey: CacheKey(key)) else { return nil }
         guard cacheEntry.expirationDate > creationDate else {
-            remove(forKey: key)
+            removeInMemory(forKey: key)
             return nil
         }
         return cacheEntry.value
@@ -133,36 +79,26 @@ actor CacheService<Key: Hashable, Value: Codable>: CacheServiceLogic {
         memory.removeObject(forKey: CacheKey(key))
     }
 
-    private func removeAllInMemory() {
-        guard isMemoryType else { return }
-        memory.removeAllObjects()
-    }
-
     // MARK: - Disk
-    private func insertInDisk(_ value: Value, forKey key: Key) throws {
+    private func insertInDisk(_ entry: CacheEntry<Value>, forKey key: Key) throws {
         guard isDiskType else { return }
         let cachedFileURL = disk.appendingPathComponent(CacheKey(key).pathComponent) // Pas sûr de ça?? 🔍
-        let data = try JSONEncoder().encode(CacheEntry(value: value, expirationDate: expirationTime))
+        let data = try JSONEncoder().encode(entry)
         try data.write(to: cachedFileURL)
     }
 
-    // TODO:
     private func valueInDisk(forKey key: Key) throws -> Value? {
-        guard isDiskType,
-              let data = fileManager.contents(atPath: disk.appendingPathComponent(CacheKey(key).pathComponent).path),
-              let cacheEntry = try JSONDecoder().decode(Value.self, from: data)
-        else { return nil }
-
+        guard isDiskType, let data = fileManager.contents(atPath: disk.appendingPathComponent(CacheKey(key).pathComponent).absoluteString) else { return nil }
+        let cacheEntry = try JSONDecoder().decode(CacheEntry<Value>.self, from: data)
+        guard cacheEntry.expirationDate > creationDate else {
+            removeInDisk(forKey: key)
+            return nil
+        }
         return cacheEntry.value
     }
 
-    // TODO:
     private func removeInDisk(forKey key: Key) {
         guard isDiskType else { return }
-    }
-
-    // TODO:
-    private func removeAllInDisk() {
-        guard isDiskType else { return }
+        try? fileManager.removeItem(at: disk.appendingPathComponent(CacheKey(key).pathComponent))
     }
 }

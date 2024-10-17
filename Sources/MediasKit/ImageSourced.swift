@@ -12,8 +12,7 @@
 //    case scaleToFill
 //}
 //
-//@Observable
-//final class ImageSourcedViewModel {
+//public final class ImageSourcedViewModel: ObservableObject {
 //
 //}
 //
